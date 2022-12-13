@@ -68,10 +68,10 @@ def quick_finfo(f: pd.DataFrame, fee=0.02, bahead=50, sahead=5):
             mnis.append(bi)
             chs.append(ch)
         i = si+1
-    return mxis, mnis, np.sum(chs)
+    return mxis, mnis, chs
 
 
-def finfo(ff: pd.DataFrame, fee=0.02):
+def finfo(ff: pd.DataFrame, fee=0.02, force_last_sell=True):
     def change(f, i): return (f-i)/i
     ps = ff.loc[:, "meanp"].to_numpy()
     n = ps.shape[0]
@@ -123,6 +123,6 @@ def finfo(ff: pd.DataFrame, fee=0.02):
         mxis.append(mxi)
         i += 1
     
-    if len(mnis)>0 and len(mnis)>len(mxis):
+    if force_last_sell and len(mnis)>0 and len(mnis)>len(mxis):
         mnis.pop()
-    return mxis, mnis, np.sum(chs)
+    return mxis, mnis, chs
