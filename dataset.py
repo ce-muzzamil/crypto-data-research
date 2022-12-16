@@ -3,6 +3,10 @@ import numpy as np
 import pandas as pd
 from rise_and_fall import *
 
+from multiprocessing import Process
+import tempfile
+import glob
+
 
 class Dataset:
     def __init__(self):
@@ -46,7 +50,7 @@ class Dataset:
 
         frame.reset_index(drop=True, inplace=True)
         mxis, mnis, chs = finfo(frame, fee=fee)
-        
+
         if absolute_last_mni is not None:
             mni = absolute_last_mni - (at-length)
             mnis.append(mni)
@@ -170,3 +174,61 @@ class Dataset:
             return xs, y1s, y2s, y3s
         else:
             return xs, y1s, y2s
+
+    def prepare_dataset_wrapper(self, folder='', index=0, batch_size=2**12, buy=True, validation=False, test=False):
+        ds = self.prepare_dataset(
+            batch_size=batch_size, buy=buy, validation=validation, test=test)
+        if buy:
+            x, y1, y2, y3 = ds
+            np.save(folder+f'/x_{index}.npy', x)
+            np.save(folder+f'/y_{index}.npy', np.array([y1, y2, y3]))
+        else:
+            x, y1, y2 = ds
+            np.save(folder+f'/x_{index}.npy', x)
+            np.save(folder+f'/y_{index}.npy', np.array([y1, y2]))
+
+    def get_data_set(self, batch_size, buy=True, validation=False, test=False, max_procs=10, single_process_size=2**8):
+        x = []
+        y = []
+        with tempfile.TemporaryDirectory() as tmpdirname:
+
+            required_procs = max(int(batch_size/single_process_size), 1)
+            completed_procs = 0
+
+            while completed_procs < required_procs:
+                procs = []
+                for i in range(min(max_procs, required_procs-completed_procs)):
+                    index = completed_procs+i
+                    proc = Process(target=self.prepare_dataset_wrapper, args=(
+                        tmpdirname, index, single_process_size, buy, validation, test))
+                    procs.append(proc)
+                    proc.start()
+
+                for proc in procs:
+                    proc.join()
+
+                completed_procs += len(procs)
+
+            def retrive_index(r): return int(
+                r.split("\\")[-1].split("_")[-1].split(".")[0])
+
+            def retrive_name(r): return r.split("\\")[-1].split(".")[0]
+
+            res = glob.glob(tmpdirname+'/*.*')
+
+            x_files = [r for r in res if 'x' in retrive_name(r)]
+            x_files_order = [retrive_index(r) for r in x_files]
+
+            y_files = [r for r in res if 'y' in retrive_name(r)]
+            ordered_y_files = []
+            for order in x_files_order:
+                ordered_y_files.extend(
+                    [r for r in y_files if retrive_index(r) == order])
+
+            x.extend([np.load(r) for r in x_files])
+            y.extend([np.load(r) for r in ordered_y_files])
+
+        x = np.concatenate(x)
+        y = np.concatenate(y, axis=1)
+
+        return x, [y[i] for i in range(y.shape[0])]
