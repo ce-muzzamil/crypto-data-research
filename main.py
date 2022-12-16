@@ -8,10 +8,10 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
 
-tr_size = 2**4
-vl_size = 2**2
-epochs = 2
-single_process_size = 2**2
+tr_size = 2**15
+vl_size = 2**12
+epochs = 50
+single_process_size = 2**8
 max_procs = 8
 max_training_counter = 10
 
