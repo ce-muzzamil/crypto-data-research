@@ -1,2 +1,4 @@
 database/
 model_history/
+
+*.npz

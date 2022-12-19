@@ -28,6 +28,7 @@ class Dataset:
         nf.fillna(0.0, inplace=True)
         nf["ntrds"] = f.loc[:, "8"]
         self.nf = nf
+        
 
     def get_processed_frame(
         self,
@@ -60,6 +61,7 @@ class Dataset:
             lambda x: x.weekday())  # mon=0, sun=6
         frame['stime'] = frame["stime"].apply(lambda x: (
             maxtime/length)*(x.hour*60.0+x.minute)/kinterval)
+
         frame['ntrds'] = frame["ntrds"].apply(lambda x: x/maxtrds)
         frame['mnis'] = 0
         frame.loc[mnis, 'mnis'] = 1
@@ -84,6 +86,7 @@ class Dataset:
         kinterval=5.0,
         maxtime=18.0,
         fee=0.005,
+        to_numpy=True
     ):
         frame = self.nf.iloc[at-length:at, :]  # nf is the database
         mxis1, mnis1, ch1 = finfo(frame, fee=fee)
@@ -102,7 +105,10 @@ class Dataset:
         frame = self.nf.iloc[nat-length:nat, :]
         frame = self.get_processed_frame(
             frame, length=length, kinterval=kinterval, maxtime=maxtime, fee=fee)
-        return frame.to_numpy(), buyat, sellat, potential_change
+        if to_numpy:
+            return frame.to_numpy(), buyat, sellat, potential_change
+        else:
+            return frame, buyat, sellat, potential_change
 
     def labeled_sell_frame(
         self,
@@ -111,6 +117,7 @@ class Dataset:
         kinterval=5.0,
         maxtime=18.0,
         fee=0.005,
+        to_numpy=True
     ):
         frame = self.nf.iloc[at-length:at, :]  # nf is the database
         mxis1, mnis1, ch1 = finfo(frame, fee=fee)
@@ -128,7 +135,10 @@ class Dataset:
         frame = self.nf.iloc[nat-length:nat, :]
         frame = self.get_processed_frame(
             frame, length=length, kinterval=kinterval, maxtime=maxtime, fee=fee, absolute_last_mni=at-length+mnis1[-1])
-        return frame.to_numpy(), sellat, potential_change
+        if to_numpy:
+            return frame.to_numpy(), sellat, potential_change
+        else:
+            return frame, sellat, potential_change
 
     def prepare_dataset(self, batch_size=1024, validation=False, test=False, buy=True):
         safety = 4096
