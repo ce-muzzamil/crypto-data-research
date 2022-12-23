@@ -20,7 +20,7 @@ def format_time(seconds):
 
 def clock_loss(y_true, y_pred):
     '''On a scale of 5 min interval this loss gives 0.0 as the minimum most loss while a gap of 5 mins in decission increases the loss to 17.403757, max loss is set by highest panelty'''
-    maxtime = 18.0
+    maxtime = 63.0
     highest_panelty = 1000.0
     up_scaler = 64.0
 
@@ -32,64 +32,79 @@ def clock_loss(y_true, y_pred):
         tf.where(y_pred > maxtime/2.0, _y_pred, y_pred)
     error = tf.abs(error)
 
+    
+    highest_panelty = y_pred*0.0 + highest_panelty
+
+
     # return tf.where(is_y_pred_out_of_bounds, highest_panelty, up_scaler*tf.math.exp(tf.math.pow(error, tf.math.pow(0.95, error))))
     return tf.where(is_y_pred_out_of_bounds, highest_panelty, up_scaler*tf.math.log(error+1.0))
 
 
-def gc_block(inputs, gru_units=32, return_sequences=True):
-    g1 = tf.keras.layers.GRU(gru_units, dropout=0.25,
-                             return_sequences=return_sequences)
-    g2 = tf.keras.layers.Bidirectional(g1)(inputs)
-    return g2
+def gru_res_block(inputs, skip=3, gru_entry_units=32, gru_exit_units=64, return_sequences=False):
+    g = tf.keras.layers.GRU(gru_entry_units,
+                            return_sequences=True)(inputs)
+
+    for i in range(skip-1):
+        gr = tf.keras.layers.GRU(gru_entry_units,
+                                 return_sequences=True)(g if i == 0 else gr)
+
+    gr = tf.keras.layers.GRU(gru_exit_units,
+                             return_sequences=return_sequences)(gr)
+    sk = tf.keras.layers.GRU(gru_exit_units,
+                             return_sequences=return_sequences)(g)
+
+    return tf.keras.layers.Add()([gr, sk])
 
 
-def cn_block(inputs, conv_filters=64, is_last=False):
+def cn_block(inputs, conv_filters=32, kernel=3, is_last=False):
     c1 = tf.keras.layers.Conv1D(
-        conv_filters, 3, padding='same')(inputs)
+        conv_filters, kernel, padding='same')(inputs)
     bn1 = tf.keras.layers.BatchNormalization()(c1)
     ac1 = tf.keras.layers.ReLU()(bn1)
-    m1 = tf.keras.layers.MaxPool1D(3)(ac1)
-    m1_ = tf.keras.layers.Dropout(0.25)(m1)
     if is_last:
-        return tf.keras.layers.Flatten()(m1_)
-    return m1_
+        return tf.keras.layers.GlobalAveragePooling1D()(ac1)
+    return ac1
 
 
-# def gc_feature_extractor(inputs):
-#     c1 = cn_block(inputs, 32)
-#     gc1 = gc_block(c1, 64)
+def cnn_res_block(inputs, skip=3, conv_entry_filters=32, conv_exit_filters=64, is_last=False):
+    c = cn_block(inputs, conv_entry_filters, kernel=1, is_last=False)
 
-#     c2 = cn_block(gc1, 256)
-#     gc2 = gc_block(c2, 512, return_sequences=False)
-#     return gc2
+    for i in range(skip-1):
+        cr = cn_block(c if i == 0 else cr, conv_entry_filters,
+                      kernel=3, is_last=False)
+
+    cr = cn_block(cr, conv_exit_filters, kernel=3, is_last=is_last)
+
+    sk = cn_block(c, conv_exit_filters, kernel=1, is_last=is_last)
+
+    return tf.keras.layers.Add()([cr, sk])
+
 
 def gc_feature_extractor(inputs):
-    # c1 = cn_block(inputs, 64)
-    # c2 = cn_block(c1, 128,is_last=True)
-    # c3 = cn_block(c2, 128)
-    # c4 = cn_block(c3, 256)
-    # c5 = cn_block(c4, 512, is_last=True)
-    # gc1 = gc_block(c4, 512, return_sequences=False)
-    gc1 = gc_block(inputs, 64, return_sequences=False)
-    return gc1
+    cb = cn_block(inputs, conv_filters=32, kernel=7, is_last=False)
+    crb = cnn_res_block(cb, conv_entry_filters=32, skip=3,
+                        conv_exit_filters=64, is_last=True)
+    grb = gru_res_block(inputs, skip=3, gru_entry_units=32,
+                        gru_exit_units=64, return_sequences=False)
+    return tf.keras.layers.Concatenate(axis=1)([crb, grb])
 
 
-def buy_predictor(input_shape=(288, 12)):
+def buy_predictor(input_shape=(288, 11)):
     inputs = tf.keras.layers.Input(input_shape)
     gcfe = gc_feature_extractor(inputs)
 
-    extracted_features = tf.keras.layers.Dense(128, activation='relu')(gcfe)
-    extracted_features_ = tf.keras.layers.Dropout(0.25)(extracted_features)
+    extracted_features = tf.keras.layers.Dense(256, activation='relu')(gcfe)
+    extracted_features_ = tf.keras.layers.Dropout(0.5)(extracted_features)
     buytime = tf.keras.layers.Dense(1, name="y1")(extracted_features_)
 
     selling_features = tf.keras.layers.Concatenate(
         axis=1)([extracted_features, buytime])
-    selling_features_ = tf.keras.layers.Dropout(0.25)(selling_features)
+    selling_features_ = tf.keras.layers.Dropout(0.5)(selling_features)
     selltime = tf.keras.layers.Dense(1, name="y2")(selling_features_)
 
     change_features = tf.keras.layers.Concatenate(
         axis=1)([selling_features, selltime])
-    change_features_ = tf.keras.layers.Dropout(0.25)(change_features)
+    change_features_ = tf.keras.layers.Dropout(0.5)(change_features)
     aquired_change = tf.keras.layers.Dense(1, name="y3")(change_features_)
 
     model = tf.keras.Model(inputs=inputs, outputs=[

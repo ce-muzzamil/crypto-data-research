@@ -1,14 +1,17 @@
-import json
-import numpy as np
-import pandas as pd
-from rise_and_fall import *
+"""This is a database class"""
 
+import json
 from multiprocessing import Process
 import tempfile
 import glob
 
+import numpy as np
+import pandas as pd
+from rise_and_fall import *
+
 
 class Dataset:
+    """ This a Dataset class"""
     def __init__(self):
         with open("datasplit.json", 'r') as file:
             dataset = json.load(file)
@@ -36,7 +39,7 @@ class Dataset:
         absolute_last_mni=None,
         length=288,
         kinterval=5.0,
-        maxtime=18.0,
+        maxtime=18.0, #maximum time in a day e.g 288*5 mins = 18.0 where 18.0 is a representation
         maxtrds=5000.0,
         maxstdp=50.0,
         maxprice=5e4,
@@ -57,10 +60,14 @@ class Dataset:
             mnis.append(mni)
 
         frame['stime'] = pd.to_datetime(frame['stime'], unit='ms')
-        frame['day'] = frame["stime"].apply(
+        
+        day = frame["stime"].apply(
             lambda x: x.weekday())  # mon=0, sun=6
+
         frame['stime'] = frame["stime"].apply(lambda x: (
             maxtime/length)*(x.hour*60.0+x.minute)/kinterval)
+
+        frame['stime'] = frame['stime'] + day*18.0
 
         frame['ntrds'] = frame["ntrds"].apply(lambda x: x/maxtrds)
         frame['mnis'] = 0
@@ -75,7 +82,7 @@ class Dataset:
         frame['stdp'] = frame["stdp"].apply(lambda x: x/maxstdp)
         frame['meanp'] = normalize(frame['meanp'], maxprice, 1e-9)*9 + 1
         frame['vol'] = normalize(frame['vol'], maxvol, 0.0)
-        frame = frame.loc[:, ['stime', 'day', 'meanp', 'stdp', 'ch', 'mnis',
+        frame = frame.loc[:, ['stime', 'meanp', 'stdp', 'ch', 'mnis',
                               'mxis', 'aqch', 'taker', 'maker', 'vol', 'ntrds']]
         return frame
 
