@@ -32,26 +32,21 @@ def clock_loss(y_true, y_pred):
         tf.where(y_pred > maxtime/2.0, _y_pred, y_pred)
     error = tf.abs(error)
 
-    
-    highest_panelty = y_pred*0.0 + highest_panelty
-
+    # highest_panelty = y_pred*0.0 + highest_panelty
 
     # return tf.where(is_y_pred_out_of_bounds, highest_panelty, up_scaler*tf.math.exp(tf.math.pow(error, tf.math.pow(0.95, error))))
-    return tf.where(is_y_pred_out_of_bounds, highest_panelty, up_scaler*tf.math.log(error+1.0))
+    # return tf.where(is_y_pred_out_of_bounds, highest_panelty, up_scaler*tf.math.log(error+1.0))
+    return tf.where(is_y_pred_out_of_bounds, highest_panelty, tf.math.pow(error, 2.5))
 
 
 def gru_res_block(inputs, skip=3, gru_entry_units=32, gru_exit_units=64, return_sequences=False):
-    g = tf.keras.layers.GRU(gru_entry_units,
-                            return_sequences=True)(inputs)
 
-    for i in range(skip-1):
-        gr = tf.keras.layers.GRU(gru_entry_units,
-                                 return_sequences=True)(g if i == 0 else gr)
+    for i in range(skip):
+        gr = tf.keras.layers.GRU(gru_entry_units if i < (skip-1) else gru_exit_units,
+                                 return_sequences=True if i < (skip-1) else return_sequences)(gr if i > 0 else inputs)
 
-    gr = tf.keras.layers.GRU(gru_exit_units,
-                             return_sequences=return_sequences)(gr)
     sk = tf.keras.layers.GRU(gru_exit_units,
-                             return_sequences=return_sequences)(g)
+                             return_sequences=return_sequences)(inputs)
 
     return tf.keras.layers.Add()([gr, sk])
 
@@ -67,26 +62,43 @@ def cn_block(inputs, conv_filters=32, kernel=3, is_last=False):
 
 
 def cnn_res_block(inputs, skip=3, conv_entry_filters=32, conv_exit_filters=64, is_last=False):
-    c = cn_block(inputs, conv_entry_filters, kernel=1, is_last=False)
 
-    for i in range(skip-1):
-        cr = cn_block(c if i == 0 else cr, conv_entry_filters,
-                      kernel=3, is_last=False)
+    kernel = [3 for _ in range(skip)]
+    kernel[0] = 1
+    kernel[-1] = 1
+    for i in range(skip):
+        cr = cn_block(cr if i > 0 else inputs, conv_entry_filters if i < (skip-1) else conv_exit_filters,
+                      kernel=kernel[i], is_last=False if i < (skip-1) else is_last)
 
-    cr = cn_block(cr, conv_exit_filters, kernel=3, is_last=is_last)
-
-    sk = cn_block(c, conv_exit_filters, kernel=1, is_last=is_last)
+    sk = cn_block(inputs, conv_exit_filters, kernel=1, is_last=is_last)
 
     return tf.keras.layers.Add()([cr, sk])
 
 
 def gc_feature_extractor(inputs):
-    cb = cn_block(inputs, conv_filters=32, kernel=7, is_last=False)
-    crb = cnn_res_block(cb, conv_entry_filters=32, skip=3,
-                        conv_exit_filters=64, is_last=True)
-    grb = gru_res_block(inputs, skip=3, gru_entry_units=32,
-                        gru_exit_units=64, return_sequences=False)
-    return tf.keras.layers.Concatenate(axis=1)([crb, grb])
+    cb1 = cn_block(inputs, conv_filters=32, kernel=7, is_last=False)
+
+    crb1 = cnn_res_block(cb1, conv_entry_filters=32, skip=3,
+                         conv_exit_filters=64, is_last=False)
+
+    cb2_gbp = cn_block(crb1, conv_filters=128, kernel=3, is_last=True)
+
+    crb2_gbp = cnn_res_block(crb1, conv_entry_filters=64, skip=3,
+                             conv_exit_filters=128, is_last=True)
+    
+    crc1 = tf.keras.layers.Add()([crb2_gbp, cb2_gbp])
+
+    grb1 = gru_res_block(inputs, skip=3, gru_entry_units=32,
+                        gru_exit_units=64, return_sequences=True)
+    
+    g1 = tf.keras.layers.GRU(128, return_sequences=False)(grb1)
+    
+    grb2_flat = gru_res_block(inputs, skip=3, gru_entry_units=64,
+                        gru_exit_units=128, return_sequences=False)
+    
+    grg1 =tf.keras.layers.Add()([grb2_flat, g1])
+
+    return tf.keras.layers.Concatenate(axis=1)([crc1, grg1])
 
 
 def buy_predictor(input_shape=(288, 11)):
@@ -95,17 +107,22 @@ def buy_predictor(input_shape=(288, 11)):
 
     extracted_features = tf.keras.layers.Dense(256, activation='relu')(gcfe)
     extracted_features_ = tf.keras.layers.Dropout(0.5)(extracted_features)
-    buytime = tf.keras.layers.Dense(1, name="y1")(extracted_features_)
 
+    extracted_features = tf.keras.layers.Dense(128, activation='relu')(extracted_features_)
+    extracted_features = tf.keras.layers.Dropout(0.25)(extracted_features)
+    buytime = tf.keras.layers.Dense(1, name="y1")(extracted_features)
+
+    extracted_features = tf.keras.layers.Dense(128, activation='relu')(extracted_features_)
+    extracted_features = tf.keras.layers.Dropout(0.25)(extracted_features)
     selling_features = tf.keras.layers.Concatenate(
         axis=1)([extracted_features, buytime])
-    selling_features_ = tf.keras.layers.Dropout(0.5)(selling_features)
-    selltime = tf.keras.layers.Dense(1, name="y2")(selling_features_)
+    selltime = tf.keras.layers.Dense(1, name="y2")(selling_features)
 
+    extracted_features = tf.keras.layers.Dense(128, activation='relu')(extracted_features_)
+    extracted_features = tf.keras.layers.Dropout(0.25)(extracted_features)
     change_features = tf.keras.layers.Concatenate(
-        axis=1)([selling_features, selltime])
-    change_features_ = tf.keras.layers.Dropout(0.5)(change_features)
-    aquired_change = tf.keras.layers.Dense(1, name="y3")(change_features_)
+        axis=1)([extracted_features, buytime, selltime])
+    aquired_change = tf.keras.layers.Dense(1, name="y3")(change_features)
 
     model = tf.keras.Model(inputs=inputs, outputs=[
                            buytime, selltime, aquired_change])
@@ -150,7 +167,7 @@ def train_bp_model(inputs=None, outputs=None, validation_data=None, verbose=None
     st = time.time()
     model = get_bp_model(lr)
     callback = tf.keras.callbacks.EarlyStopping(
-        monitor='val_loss' if save else 'loss', patience=patience, restore_best_weights=False)
+        monitor='val_loss' if save else 'loss', patience=patience, restore_best_weights=True)
 
     hist = model.fit(inputs, outputs, epochs=epochs,
                      validation_data=validation_data, verbose=verbose, callbacks=[callback], batch_size=mini_batch_size)

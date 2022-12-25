@@ -100,11 +100,12 @@ class Dataset:
         def change(f, i): return (f-i)/i
         buytime = pd.to_datetime(
             frame.loc[at-length+mnis1[-1], 'stime'], unit='ms')
-        buyat = (maxtime/length)*(buytime.hour*60.0+buytime.minute)/kinterval
+        buyat = (maxtime/length)*(buytime.hour*60.0+buytime.minute)/kinterval + maxtime*buytime.weekday()
+
         selltime = pd.to_datetime(
             frame.loc[at-length+mxis1[-1], 'stime'], unit='ms')
         sellat = (maxtime/length)*(selltime.hour *
-                                   60.0+selltime.minute)/kinterval
+                                   60.0+selltime.minute)/kinterval + maxtime*selltime.weekday()
         potential_change = change(
             frame.loc[at-length+mxis1[-1], 'meanp'], frame.loc[at-length+mnis1[-1], 'meanp'])
 
@@ -133,7 +134,7 @@ class Dataset:
         selltime = pd.to_datetime(
             frame.loc[at-length+mxis1[-1], 'stime'], unit='ms')
         sellat = (maxtime/length)*(selltime.hour *
-                                   60.0+selltime.minute)/kinterval
+                                   60.0+selltime.minute)/kinterval + maxtime*selltime.weekday()
         potential_change = change(
             frame.loc[at-length+mxis1[-1], 'meanp'], frame.loc[at-length+mnis1[-1], 'meanp'])
 
