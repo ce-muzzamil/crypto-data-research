@@ -20,21 +20,20 @@ max_procs = 10
 max_training_counter = 100
 
 
+def get_data(*vars, size):
+    outs = []
+    indicies = None
+    for var in vars:
+        ds = np.load(f'database/{var}.npy', mmap_mode='r')
+        if indicies is None:
+            indicies = np.random.choice(ds.shape[0], (size,))
+        outs.append(ds[indicies])
+        del ds
 
-def get_data(x, y, size):
-    ds = np.load(f'database/{x}.npy', mmap_mode='r')
-    indicies = np.random.choice(ds.shape[0], (size,))
-    xd = ds[indicies]
-    del ds
-
-    ds = np.load(f'database/{y}.npy', mmap_mode='r')
-    yd = ds.T[indicies]
-    yd = yd.T
-    del ds
-
-    return xd, [yd[i] for i in range(yd.shape[0])]
+    return outs
 
 # show_model()
+
 
 if __name__ == '__main__':
     db = Dataset()
@@ -42,7 +41,7 @@ if __name__ == '__main__':
         training_counter = len(json.load(file))
     _lr = 0.001
 
-    start=True
+    start = True
     if not use_predefined_DS:
         st = time.time()
         print("Creating validation dataset...")
@@ -74,21 +73,21 @@ if __name__ == '__main__':
             print(
                 f"Dataset created with {inputs.shape[0]} training points in {format_time(time.time()-st)}")
         else:
-            if np.random.rand()>0.5 and not start:
+            if np.random.rand() > 0.5 and not start:
                 print("Retriving saved data...")
                 inputs, outputs = get_data('inputs', 'outputs', tr_size)
                 print("Done")
             else:
-                start=False
+                start = False
 
         if np.random.rand() > 0.5:
             lr = get_op_lr(lrx=lrx, lry=lry, mini_batch_size=mini_batch_size)
         else:
-            _lr =  0.05*0.9**(12*np.log(training_counter+1))
+            _lr = 0.05*0.9**(12*np.log(training_counter+1))
             lr = _lr
 
         print("Uisng lr= ", lr)
         train_bp_model(inputs=inputs, outputs=outputs,
                        validation_data=(vlx, vly), epochs=epochs, verbose=1, lr=lr, mini_batch_size=mini_batch_size, patience=25)
 
-        training_counter+=1
+        training_counter += 1

@@ -12,6 +12,7 @@ from rise_and_fall import *
 
 class Dataset:
     """ This a Dataset class"""
+
     def __init__(self):
         with open("datasplit.json", 'r') as file:
             dataset = json.load(file)
@@ -30,127 +31,215 @@ class Dataset:
         nf["maker"] = (f.loc[:, "7"]-f.loc[:, "10"])/f.loc[:, "7"]
         nf.fillna(0.0, inplace=True)
         nf["ntrds"] = f.loc[:, "8"]
+        self.mu = nf.mean()
+        self.sigma = nf.std()
+        self.mx = nf.max()
+        self.mn = nf.min()
         self.nf = nf
-        
 
-    def get_processed_frame(
+    # def get_minimalistic_frame(
+    #     self,
+    #     at=1000,
+    #     length=576,
+    #     backwardlook=288,
+    #     max_size=64,
+    #     kinterval=5.0,
+    # ):
+    #     aa = []
+    #     size = 0
+    #     look_past = 0
+    #     mn_index = np.zeros((0,))
+    #     mx_index = np.zeros((0,))
+    #     end_at = at-look_past
+    #     max_size += 1
+    #     last_vectors = []
+        
+    #     while size < max_size:
+    #         start_at = at-length-look_past
+    #         a = self.nf.iloc[start_at:end_at, :]
+    #         a.reset_index(drop=True, inplace=True)
+
+    #         mxis, mnis, ch = finfo(a, fee=0.005)
+    #         mn_index = np.append(mn_index, np.array(mnis)+start_at)
+    #         mx_index = np.append(mx_index, np.array(mxis)+start_at)
+
+    #         a = a.assign(mnis=0.0)
+    #         a = a.assign(mxis=0.0)
+    #         a = a.assign(ch=0.0)
+    #         a.loc[mnis, 'mnis'] = 1.0
+    #         a.loc[mxis, 'mxis'] = 1.0
+    #         a.loc[mxis, 'ch'] = np.array(ch)*100.0
+
+    #         fltr = np.logical_or(a['mnis'], a['mxis'])
+    #         indices = a[fltr].index
+    #         vectors = np.zeros((indices.shape[0], 7))
+    #         for i in range(indices.shape[0]-1):
+    #             vectors[i+1, [0, 2, 3]] = a.loc[0 if i == 0 else indices[i]
+    #                                                             :indices[i+1], ['meanp', 'taker', 'maker']].mean().to_numpy()
+    #             stdp = a.loc[0 if i == 0 else indices[i]
+    #                                          :indices[i+1], 'meanp'].std()
+    #             if np.isnan(stdp):
+    #                 stdp = 0.0
+    #             vectors[i+1, 1] = stdp
+    #             vectors[i+1, [4, 5]] = a.loc[0 if i == 0 else indices[i]
+    #                 :indices[i+1], ['vol', 'ntrds']].sum()
+    #             vectors[i+1, 6] = (indices[i+1]-indices[i])*kinterval
+
+    #         last_vector = np.zeros((7,))
+    #         last_vector[[0, 2, 3]] = a.loc[indices[-1]:,
+    #                                        ['meanp', 'taker', 'maker']].mean().to_numpy()
+    #         last_vector[1] = a.loc[indices[-1]:, 'meanp'].std()
+    #         last_vector[[4, 5]] = a.loc[indices[-1]:, ['vol', 'ntrds']].sum()
+    #         last_vector[6] = (a.index[-1]-indices[-1])*kinterval
+    #         last_vectors.append(last_vector)
+
+    #         a = a.loc[fltr, :]
+    #         a.reset_index(drop=True, inplace=True)
+    #         a = pd.concat([a.loc[:, ['stime', 'meanp', 'stdp', 'ch']], pd.DataFrame(
+    #             vectors, columns=['avgp', 'stdavgp', 'taker', 'maker', 'vol', 'ntrds', 'gap'])], axis=1)
+    #         aa.append(a)
+    #         size += a.shape[0]
+    #         look_past += backwardlook
+    #         end_at = start_at
+
+    #     for i in range(len(last_vectors)-1):
+    #         aa[i].loc[0, ['avgp', 'stdavgp', 'taker', 'maker',
+    #                       'vol', 'ntrds', 'gap']] = last_vectors[i+1]
+    #     aa.reverse()
+    #     a = pd.concat(aa)
+    #     index = a.pop('stime')
+    #     a.set_index(pd.to_datetime(index, unit='ms'), drop=True, inplace=True)
+
+    #     return a.iloc[-(max_size-1):], mx_index, mn_index
+
+    def get_minimalistic_frame(
         self,
-        f: pd.DataFrame,
-        absolute_last_mni=None,
-        length=288,
+        at=1000,
+        length=144,
+        backwardlook=144,
+        max_size=64,
         kinterval=5.0,
-        maxtime=18.0, #maximum time in a day e.g 288*5 mins = 18.0 where 18.0 is a representation
-        maxtrds=5000.0,
-        maxstdp=50.0,
-        maxprice=5e4,
-        maxvol=5e6,
-        fee=0.005,
     ):
-        def change(f, i): return (f-i)/i
-        def normalize(x, xmx, xmn): return (x-xmn)/(xmx-xmn)
+        aa = []
+        size = 0
+        look_past = 0
+        mn_index = np.zeros((0,))
+        mx_index = np.zeros((0,))
+        end_at = at-look_past
+        max_size += 1
+        last_vectors = []
+        first_vectors = []
 
-        frame = f.copy(deep=True)
-        at = frame.index[-1]+1
+        while size < max_size:
+            start_at = at-length-look_past
+            a = self.nf.iloc[start_at:end_at, :]
+            a.reset_index(drop=True, inplace=True)
 
-        frame.reset_index(drop=True, inplace=True)
-        mxis, mnis, chs = finfo(frame, fee=fee)
+            mxis, mnis, ch = finfo(a, fee=0.005)
+            mn_index = np.append(mn_index, np.array(mnis)+start_at)
+            mx_index = np.append(mx_index, np.array(mxis)+start_at)
 
-        if absolute_last_mni is not None:
-            mni = absolute_last_mni - (at-length)
-            mnis.append(mni)
+            a = a.assign(mnis=0.0)
+            a = a.assign(mxis=0.0)
+            a = a.assign(ch=0.0)
+            a.loc[mnis, 'mnis'] = 1.0
+            a.loc[mxis, 'mxis'] = 1.0
+            a.loc[mxis, 'ch'] = np.array(ch)*100.0
 
-        frame['stime'] = pd.to_datetime(frame['stime'], unit='ms')
-        
-        day = frame["stime"].apply(
-            lambda x: x.weekday())  # mon=0, sun=6
+            fltr = np.logical_or(a['mnis'], a['mxis'])
+            indices = a[fltr].index
+            vectors = np.zeros((indices.shape[0], 7))
 
-        frame['stime'] = frame["stime"].apply(lambda x: (
-            maxtime/length)*(x.hour*60.0+x.minute)/kinterval)
+            first_vector = np.zeros((7,))
+            first_vector[[0, 2, 3]] = a.loc[:indices[0],['meanp', 'taker', 'maker']].mean().to_numpy()
+            first_vector[1] = a.loc[:indices[0], 'meanp'].std()
+            first_vector[[4, 5]] = a.loc[:indices[0], ['vol', 'ntrds']].sum()
+            first_vector[6] = (indices[0]-a.index[0])*kinterval
+            first_vectors.append(first_vector)
 
-        frame['stime'] = frame['stime'] + day*18.0
+            for i in range(indices.shape[0]-1):
+                vectors[i+1, [0, 2, 3]] = a.loc[indices[i]:indices[i+1], ['meanp', 'taker', 'maker']].mean().to_numpy()
+                stdp = a.loc[indices[i]:indices[i+1], 'meanp'].std()
+                if np.isnan(stdp):
+                    stdp = 0.0
+                vectors[i+1, 1] = stdp
+                vectors[i+1, [4, 5]] = a.loc[indices[i]:indices[i+1], ['vol', 'ntrds']].sum()
+                vectors[i+1, 6] = (indices[i+1]-indices[i])*kinterval
 
-        frame['ntrds'] = frame["ntrds"].apply(lambda x: x/maxtrds)
-        frame['mnis'] = 0
-        frame.loc[mnis, 'mnis'] = 1
-        frame['mxis'] = 0
-        frame.loc[mxis, 'mxis'] = 1
-        frame['aqch'] = 0.0
-        frame.loc[mxis, 'aqch'] = np.array(chs)*100.
-        ps = frame.loc[:, 'meanp'].to_numpy()
-        frame['ch'] = 0.0
-        frame.loc[1:, 'ch'] = change(ps[1:], ps[:-1])*100.
-        frame['stdp'] = frame["stdp"].apply(lambda x: x/maxstdp)
-        frame['meanp'] = normalize(frame['meanp'], maxprice, 1e-9)*9 + 1
-        frame['vol'] = normalize(frame['vol'], maxvol, 0.0)
-        frame = frame.loc[:, ['stime', 'meanp', 'stdp', 'ch', 'mnis',
-                              'mxis', 'aqch', 'taker', 'maker', 'vol', 'ntrds']]
-        return frame
 
-    def labeled_buy_frame(
+            last_vector = np.zeros((7,))
+            last_vector[[0, 2, 3]] = a.loc[indices[-1]:,['meanp', 'taker', 'maker']].mean().to_numpy()
+            last_vector[1] = a.loc[indices[-1]:, 'meanp'].std()
+            last_vector[[4, 5]] = a.loc[indices[-1]:, ['vol', 'ntrds']].sum()
+            last_vector[6] = (a.index[-1]-indices[-1])*kinterval
+            last_vectors.append(last_vector)
+
+            a = a.loc[fltr, :]
+            a.reset_index(drop=True, inplace=True)
+            a = pd.concat([a.loc[:, ['stime', 'meanp', 'stdp', 'ch']], pd.DataFrame(
+                vectors, columns=['avgp', 'stdavgp', 'taker', 'maker', 'vol', 'ntrds', 'gap'])], axis=1)
+            aa.append(a)
+            size += a.shape[0]
+            look_past += backwardlook
+            end_at = start_at
+
+        for i in range(len(last_vectors)-1):
+            aa[i].loc[0, ['avgp', 'stdavgp', 'taker', 'maker',
+                        'vol', 'ntrds', 'gap']] = np.array([first_vectors[i],last_vectors[i+1]]).mean()
+        aa.reverse()
+        a = pd.concat(aa)
+        index = a.pop('stime')
+        a.set_index(pd.to_datetime(index, unit='ms'), drop=True, inplace=True)
+        return a.iloc[-(max_size-1):], mx_index, mn_index
+
+    def get_labled_frame_for_buy(
         self,
         at=80000,
-        length=288,
+        length=144,
+        backwardlook=144,
+        max_size=64,
         kinterval=5.0,
-        maxtime=18.0,
-        fee=0.005,
-        to_numpy=True
     ):
-        frame = self.nf.iloc[at-length:at, :]  # nf is the database
-        mxis1, mnis1, ch1 = finfo(frame, fee=fee)
-        def change(f, i): return (f-i)/i
-        buytime = pd.to_datetime(
-            frame.loc[at-length+mnis1[-1], 'stime'], unit='ms')
-        buyat = (maxtime/length)*(buytime.hour*60.0+buytime.minute)/kinterval + maxtime*buytime.weekday()
+        a, mxis, _ = self.get_minimalistic_frame(
+            at=at, length=length, backwardlook=backwardlook, max_size=max_size-1, kinterval=kinterval)
+        mxi = int(mxis.max())
+        mnis = []
+        inc = 0
+        while len(mnis) < 2:
+            next_mxis, mnis, next_chs = finfo(
+                self.nf.loc[mxi:mxi+48+inc], fee=0.002)
+            inc += 12
+        next_mni = mxi+mnis[0]
+        next_mxi = mxi+next_mxis[0]
+        next_ch = next_chs[0]
+        if next_mni-mxi < 2:
+            next_mni = mxi+mnis[1]
+            next_mxi = mxi+next_mxis[0]
+            next_ch = next_chs[1]
+        random_mni = np.random.randint(mxi+1, next_mni)
+        mni = (next_mni-random_mni)*kinterval
+        next_mxi = (next_mxi-random_mni)*kinterval
 
-        selltime = pd.to_datetime(
-            frame.loc[at-length+mxis1[-1], 'stime'], unit='ms')
-        sellat = (maxtime/length)*(selltime.hour *
-                                   60.0+selltime.minute)/kinterval + maxtime*selltime.weekday()
-        potential_change = change(
-            frame.loc[at-length+mxis1[-1], 'meanp'], frame.loc[at-length+mnis1[-1], 'meanp'])
+        vector = np.zeros((a.shape[1],))
+        ft = self.nf.iloc[mxi:random_mni, :]
+        vector[[0, 1]] = ft.loc[ft.index[-1], ['meanp', 'stdp']]
+        vector[[3, 5, 6]] = ft.loc[:, ['meanp', 'taker', 'maker']].mean()
+        meanpstd = ft.loc[:, 'meanp'].std()
+        if np.isnan(meanpstd):
+            meanpstd = 0.0
+        vector[4] = meanpstd
+        vector[[7, 8]] = ft.loc[:, ['vol', 'ntrds']].sum()
+        vector[9] = ft.shape[0]*kinterval
+        ctime = pd.to_datetime(ft['stime'].iloc[-1], unit='ms')
 
-        nat = np.random.randint(at-length+mxis1[-2], at-length+mnis1[-1])
-        frame = self.nf.iloc[nat-length:nat, :]
-        frame = self.get_processed_frame(
-            frame, length=length, kinterval=kinterval, maxtime=maxtime, fee=fee)
-        if to_numpy:
-            return frame.to_numpy(), buyat, sellat, potential_change
-        else:
-            return frame, buyat, sellat, potential_change
-
-    def labeled_sell_frame(
-        self,
-        at=80000,
-        length=288,
-        kinterval=5.0,
-        maxtime=18.0,
-        fee=0.005,
-        to_numpy=True
-    ):
-        frame = self.nf.iloc[at-length:at, :]  # nf is the database
-        mxis1, mnis1, ch1 = finfo(frame, fee=fee)
-        def change(f, i): return (f-i)/i
-
-        selltime = pd.to_datetime(
-            frame.loc[at-length+mxis1[-1], 'stime'], unit='ms')
-        sellat = (maxtime/length)*(selltime.hour *
-                                   60.0+selltime.minute)/kinterval + maxtime*selltime.weekday()
-        potential_change = change(
-            frame.loc[at-length+mxis1[-1], 'meanp'], frame.loc[at-length+mnis1[-1], 'meanp'])
-
-        nat = np.random.randint(at-length+mnis1[-1], at-length+mxis1[-1])
-
-        frame = self.nf.iloc[nat-length:nat, :]
-        frame = self.get_processed_frame(
-            frame, length=length, kinterval=kinterval, maxtime=maxtime, fee=fee, absolute_last_mni=at-length+mnis1[-1])
-        if to_numpy:
-            return frame.to_numpy(), sellat, potential_change
-        else:
-            return frame, sellat, potential_change
+        a = np.concatenate([a, vector.reshape(1, -1)], axis=0)
+        ctime = ctime.weekday()*288 + (ctime.hour*60.0 + ctime.minute)/5.0
+        return a, ctime, mni, next_mxi, next_ch*100.0
 
     def prepare_dataset(self, batch_size=1024, validation=False, test=False, buy=True):
         safety = 4096
-        xs = []
+        x1s = []
+        x2s = []
         y1s = []
         y2s = []
         y3s = []
@@ -160,50 +249,55 @@ class Dataset:
         elif test:
             ats = np.random.choice(self.test_set, batch_size+safety).tolist()
         else:
-            ats = np.random.choice(self.test_set, batch_size+safety).tolist()
+            ats = np.random.choice(self.train_set, batch_size+safety).tolist()
 
         for i in range(len(ats)):
             if ats[i] not in ats[:i]:
                 try:
                     if buy:
-                        x, y1, y2, y3 = self.labeled_buy_frame(at=ats[i])
+                        x1, x2, y1, y2, y3 = self.get_labled_frame_for_buy(at=ats[i])
                     else:
-                        x, y1, y2 = self.labeled_sell_frame(at=ats[i])
+                        # x, y1, y2 = self.labeled_sell_frame(at=ats[i])
+                        pass
                 except:
                     continue
             else:
                 continue
 
-            xs.append(x)
+            x1s.append(x1)
+            x2s.append(x2)
             y1s.append(y1)
             y2s.append(y2)
             if buy:
                 y3s.append(y3)
 
-            if len(xs) >= batch_size:
+            if len(x1s) >= batch_size:
                 break
 
-        xs = np.array(xs)
+        x1s = np.array(x1s)
+        x2s = np.array(x2s)
         y1s = np.array(y1s)
         y2s = np.array(y2s)
         if buy:
             y3s = np.array(y3s)
         if buy:
-            return xs, y1s, y2s, y3s
+            return x1s, x2s, y1s, y2s, y3s
         else:
-            return xs, y1s, y2s
+            # return xs, y1s, y2s
+            pass
 
     def prepare_dataset_wrapper(self, folder='', index=0, batch_size=2**12, buy=True, validation=False, test=False):
         ds = self.prepare_dataset(
             batch_size=batch_size, buy=buy, validation=validation, test=test)
         if buy:
-            x, y1, y2, y3 = ds
-            np.save(folder+f'/x_{index}.npy', x)
-            np.save(folder+f'/y_{index}.npy', np.array([y1, y2, y3]))
+            x1, x2, y1, y2, y3 = ds
+            np.save(folder+f'/x_{index}.npy', x1)
+            np.save(folder+f'/y_{index}.npy', np.array([x2, y1, y2, y3]))
         else:
-            x, y1, y2 = ds
-            np.save(folder+f'/x_{index}.npy', x)
-            np.save(folder+f'/y_{index}.npy', np.array([y1, y2]))
+            # x, y1, y2 = ds
+            # np.save(folder+f'/x_{index}.npy', x)
+            # np.save(folder+f'/y_{index}.npy', np.array([y1, y2]))
+            pass
 
     def get_data_set(self, batch_size, buy=True, validation=False, test=False, max_procs=10, single_process_size=2**8):
         x = []
