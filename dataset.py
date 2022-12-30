@@ -31,172 +31,72 @@ class Dataset:
         nf["maker"] = (f.loc[:, "7"]-f.loc[:, "10"])/f.loc[:, "7"]
         nf.fillna(0.0, inplace=True)
         nf["ntrds"] = f.loc[:, "8"]
-        self.mu = nf.mean()
-        self.sigma = nf.std()
-        self.mx = nf.max()
-        self.mn = nf.min()
-        self.nf = nf
-
-    # def get_minimalistic_frame(
-    #     self,
-    #     at=1000,
-    #     length=576,
-    #     backwardlook=288,
-    #     max_size=64,
-    #     kinterval=5.0,
-    # ):
-    #     aa = []
-    #     size = 0
-    #     look_past = 0
-    #     mn_index = np.zeros((0,))
-    #     mx_index = np.zeros((0,))
-    #     end_at = at-look_past
-    #     max_size += 1
-    #     last_vectors = []
-        
-    #     while size < max_size:
-    #         start_at = at-length-look_past
-    #         a = self.nf.iloc[start_at:end_at, :]
-    #         a.reset_index(drop=True, inplace=True)
-
-    #         mxis, mnis, ch = finfo(a, fee=0.005)
-    #         mn_index = np.append(mn_index, np.array(mnis)+start_at)
-    #         mx_index = np.append(mx_index, np.array(mxis)+start_at)
-
-    #         a = a.assign(mnis=0.0)
-    #         a = a.assign(mxis=0.0)
-    #         a = a.assign(ch=0.0)
-    #         a.loc[mnis, 'mnis'] = 1.0
-    #         a.loc[mxis, 'mxis'] = 1.0
-    #         a.loc[mxis, 'ch'] = np.array(ch)*100.0
-
-    #         fltr = np.logical_or(a['mnis'], a['mxis'])
-    #         indices = a[fltr].index
-    #         vectors = np.zeros((indices.shape[0], 7))
-    #         for i in range(indices.shape[0]-1):
-    #             vectors[i+1, [0, 2, 3]] = a.loc[0 if i == 0 else indices[i]
-    #                                                             :indices[i+1], ['meanp', 'taker', 'maker']].mean().to_numpy()
-    #             stdp = a.loc[0 if i == 0 else indices[i]
-    #                                          :indices[i+1], 'meanp'].std()
-    #             if np.isnan(stdp):
-    #                 stdp = 0.0
-    #             vectors[i+1, 1] = stdp
-    #             vectors[i+1, [4, 5]] = a.loc[0 if i == 0 else indices[i]
-    #                 :indices[i+1], ['vol', 'ntrds']].sum()
-    #             vectors[i+1, 6] = (indices[i+1]-indices[i])*kinterval
-
-    #         last_vector = np.zeros((7,))
-    #         last_vector[[0, 2, 3]] = a.loc[indices[-1]:,
-    #                                        ['meanp', 'taker', 'maker']].mean().to_numpy()
-    #         last_vector[1] = a.loc[indices[-1]:, 'meanp'].std()
-    #         last_vector[[4, 5]] = a.loc[indices[-1]:, ['vol', 'ntrds']].sum()
-    #         last_vector[6] = (a.index[-1]-indices[-1])*kinterval
-    #         last_vectors.append(last_vector)
-
-    #         a = a.loc[fltr, :]
-    #         a.reset_index(drop=True, inplace=True)
-    #         a = pd.concat([a.loc[:, ['stime', 'meanp', 'stdp', 'ch']], pd.DataFrame(
-    #             vectors, columns=['avgp', 'stdavgp', 'taker', 'maker', 'vol', 'ntrds', 'gap'])], axis=1)
-    #         aa.append(a)
-    #         size += a.shape[0]
-    #         look_past += backwardlook
-    #         end_at = start_at
-
-    #     for i in range(len(last_vectors)-1):
-    #         aa[i].loc[0, ['avgp', 'stdavgp', 'taker', 'maker',
-    #                       'vol', 'ntrds', 'gap']] = last_vectors[i+1]
-    #     aa.reverse()
-    #     a = pd.concat(aa)
-    #     index = a.pop('stime')
-    #     a.set_index(pd.to_datetime(index, unit='ms'), drop=True, inplace=True)
-
-    #     return a.iloc[-(max_size-1):], mx_index, mn_index
 
     def get_minimalistic_frame(
         self,
-        at=1000,
-        length=144,
-        backwardlook=144,
+        at=80000,
+        length=288,
+        backwardlook=288,
         max_size=64,
         kinterval=5.0,
     ):
         aa = []
         size = 0
         look_past = 0
-        mn_index = np.zeros((0,))
-        mx_index = np.zeros((0,))
+        mnis = []
+        mxis = []
         end_at = at-look_past
         max_size += 1
-        last_vectors = []
-        first_vectors = []
 
         while size < max_size:
             start_at = at-length-look_past
             a = self.nf.iloc[start_at:end_at, :]
-            a.reset_index(drop=True, inplace=True)
-
-            mxis, mnis, ch = finfo(a, fee=0.005)
-            mn_index = np.append(mn_index, np.array(mnis)+start_at)
-            mx_index = np.append(mx_index, np.array(mxis)+start_at)
-
-            a = a.assign(mnis=0.0)
-            a = a.assign(mxis=0.0)
+            mxis_, mnis_, ch = finfo(a, fee=0.005)
+            mnis_ = np.array(mnis_)+start_at
+            mxis_ = np.array(mxis_)+start_at
+            mnis.extend(mnis_.tolist())
+            mxis.extend(mxis_.tolist())
             a = a.assign(ch=0.0)
-            a.loc[mnis, 'mnis'] = 1.0
-            a.loc[mxis, 'mxis'] = 1.0
-            a.loc[mxis, 'ch'] = np.array(ch)*100.0
+            a.loc[mxis_, 'ch'] = np.array(ch)*100.0
 
-            fltr = np.logical_or(a['mnis'], a['mxis'])
-            indices = a[fltr].index
-            vectors = np.zeros((indices.shape[0], 7))
-
-            first_vector = np.zeros((7,))
-            first_vector[[0, 2, 3]] = a.loc[:indices[0],['meanp', 'taker', 'maker']].mean().to_numpy()
-            first_vector[1] = a.loc[:indices[0], 'meanp'].std()
-            first_vector[[4, 5]] = a.loc[:indices[0], ['vol', 'ntrds']].sum()
-            first_vector[6] = (indices[0]-a.index[0])*kinterval
-            first_vectors.append(first_vector)
-
-            for i in range(indices.shape[0]-1):
-                vectors[i+1, [0, 2, 3]] = a.loc[indices[i]:indices[i+1], ['meanp', 'taker', 'maker']].mean().to_numpy()
-                stdp = a.loc[indices[i]:indices[i+1], 'meanp'].std()
-                if np.isnan(stdp):
-                    stdp = 0.0
-                vectors[i+1, 1] = stdp
-                vectors[i+1, [4, 5]] = a.loc[indices[i]:indices[i+1], ['vol', 'ntrds']].sum()
-                vectors[i+1, 6] = (indices[i+1]-indices[i])*kinterval
-
-
-            last_vector = np.zeros((7,))
-            last_vector[[0, 2, 3]] = a.loc[indices[-1]:,['meanp', 'taker', 'maker']].mean().to_numpy()
-            last_vector[1] = a.loc[indices[-1]:, 'meanp'].std()
-            last_vector[[4, 5]] = a.loc[indices[-1]:, ['vol', 'ntrds']].sum()
-            last_vector[6] = (a.index[-1]-indices[-1])*kinterval
-            last_vectors.append(last_vector)
-
-            a = a.loc[fltr, :]
-            a.reset_index(drop=True, inplace=True)
-            a = pd.concat([a.loc[:, ['stime', 'meanp', 'stdp', 'ch']], pd.DataFrame(
-                vectors, columns=['avgp', 'stdavgp', 'taker', 'maker', 'vol', 'ntrds', 'gap'])], axis=1)
             aa.append(a)
-            size += a.shape[0]
+            size = len(mxis)+len(mnis)
             look_past += backwardlook
             end_at = start_at
 
-        for i in range(len(last_vectors)-1):
-            aa[i].loc[0, ['avgp', 'stdavgp', 'taker', 'maker',
-                        'vol', 'ntrds', 'gap']] = np.array([first_vectors[i],last_vectors[i+1]]).mean()
-        aa.reverse()
-        a = pd.concat(aa)
+        a = pd.concat(aa).sort_index()
+        indices = list(set(mnis+mxis))
+        indices.sort()
+        indices = indices[-max_size:]
+
+        vectors = np.zeros((len(indices)-1, 7))
+
+        an = a.loc[indices[0]:, :].to_numpy()
+        nindices = np.array(indices)-indices[0]
+        for i in range(len(indices)-1):
+            vectors[i, [0, 2, 3]] = an[nindices[i]
+                :nindices[i+1], [1, 4, 5]].mean(axis=0)
+            stdp = an[nindices[i]:nindices[i+1], 1].std()
+            if np.isnan(stdp):
+                stdp = 0.0
+            vectors[i, 1] = stdp
+            vectors[i, [4, 5]] = an[nindices[i]                                    :nindices[i+1], [3, 6]].sum(axis=0)
+            vectors[i, 6] = (nindices[i+1]-nindices[i])*kinterval
+
+        a = a.loc[indices[1:], :]
+        a.reset_index(drop=True, inplace=True)
+        a = pd.concat([a.loc[:, ['stime', 'meanp', 'stdp', 'ch']], pd.DataFrame(
+            vectors, columns=['avgp', 'stdavgp', 'taker', 'maker', 'vol', 'ntrds', 'gap'])], axis=1)
+
         index = a.pop('stime')
         a.set_index(pd.to_datetime(index, unit='ms'), drop=True, inplace=True)
-        return a.iloc[-(max_size-1):], mx_index, mn_index
+        return a, np.array(mxis), np.array(mnis)
 
     def get_labled_frame_for_buy(
         self,
         at=80000,
-        length=144,
-        backwardlook=144,
+        length=527,
+        backwardlook=527,
         max_size=64,
         kinterval=5.0,
     ):
@@ -255,7 +155,8 @@ class Dataset:
             if ats[i] not in ats[:i]:
                 try:
                     if buy:
-                        x1, x2, y1, y2, y3 = self.get_labled_frame_for_buy(at=ats[i])
+                        x1, x2, y1, y2, y3 = self.get_labled_frame_for_buy(
+                            at=ats[i])
                     else:
                         # x, y1, y2 = self.labeled_sell_frame(at=ats[i])
                         pass

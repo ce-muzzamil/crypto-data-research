@@ -20,16 +20,12 @@ max_procs = 10
 max_training_counter = 100
 
 
-def get_data(*vars, size):
+def get_data(*vars):
     outs = []
-    indicies = None
     for var in vars:
         ds = np.load(f'database/{var}.npy', mmap_mode='r')
-        if indicies is None:
-            indicies = np.random.choice(ds.shape[0], (size,))
-        outs.append(ds[indicies])
+        outs.append(ds)
         del ds
-
     return outs
 
 # show_model()
