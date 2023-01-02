@@ -1,6 +1,5 @@
 """This is a database class"""
 
-import json
 from multiprocessing import Process
 import tempfile
 import glob
@@ -13,15 +12,16 @@ from rise_and_fall import *
 class Dataset:
     """ This a Dataset class"""
 
-    def __init__(self):
-        with open("datasplit.json", 'r') as file:
-            dataset = json.load(file)
+    def __init__(self, symbol):
 
-        self.validation_set = dataset['validation']
-        self.test_set = dataset['testing']
-        self.train_set = dataset['training']
+        indices = np.load('database/indices.npz', allow_pickle=True)['indices']
+        self.random_indices = [x for x in indices if x['symbol']==symbol][0]
 
-        f = pd.read_csv("database/BTCUSDT.csv")
+        self.validation_set = self.random_indices['v']
+        self.test_set = self.random_indices['s']
+        self.train_set = self.random_indices['r']
+
+        f = pd.read_csv(f"database/{symbol}.csv")
         nf = pd.DataFrame()
         nf["stime"] = f.loc[:, "0"]
         nf["meanp"] = f.loc[:, [str(i) for i in [1, 2, 3, 4]]].mean(axis=1)
@@ -31,6 +31,8 @@ class Dataset:
         nf["maker"] = (f.loc[:, "7"]-f.loc[:, "10"])/f.loc[:, "7"]
         nf.fillna(0.0, inplace=True)
         nf["ntrds"] = f.loc[:, "8"]
+
+        self.nf = nf
 
     def get_minimalistic_frame(
         self,
@@ -102,20 +104,25 @@ class Dataset:
     ):
         a, mxis, _ = self.get_minimalistic_frame(
             at=at, length=length, backwardlook=backwardlook, max_size=max_size-1, kinterval=kinterval)
+
         mxi = int(mxis.max())
         mnis = []
-        inc = 0
-        while len(mnis) < 2:
-            next_mxis, mnis, next_chs = finfo(
-                self.nf.loc[mxi:mxi+48+inc], fee=0.002)
-            inc += 12
+        next_mxis = []
+        next_chs = []
+        inc = 48
+        while len(mnis) < 1:
+            _next_mxis, _mnis, _next_chs = finfo(
+                self.nf.loc[mxi:mxi+48+inc, :], fee=0.005)
+            inc += 48
+            next_mxis.extend(_next_mxis)
+            mnis.extend(_mnis)
+            next_chs.extend(_next_chs)
+
         next_mni = mxi+mnis[0]
         next_mxi = mxi+next_mxis[0]
         next_ch = next_chs[0]
-        if next_mni-mxi < 2:
-            next_mni = mxi+mnis[1]
-            next_mxi = mxi+next_mxis[0]
-            next_ch = next_chs[1]
+        
+        buy_price = self.nf.loc[next_mni, 'meanp']
         random_mni = np.random.randint(mxi+1, next_mni)
         mni = (next_mni-random_mni)*kinterval
         next_mxi = (next_mxi-random_mni)*kinterval
@@ -134,7 +141,7 @@ class Dataset:
 
         a = np.concatenate([a, vector.reshape(1, -1)], axis=0)
         ctime = ctime.weekday()*288 + (ctime.hour*60.0 + ctime.minute)/5.0
-        return a, ctime, mni, next_mxi, next_ch*100.0
+        return a, ctime, mni, buy_price,  next_mxi, next_ch*100.0
 
     def prepare_dataset(self, batch_size=1024, validation=False, test=False, buy=True):
         safety = 4096
@@ -143,6 +150,7 @@ class Dataset:
         y1s = []
         y2s = []
         y3s = []
+        y4s = []
         if validation:
             ats = np.random.choice(self.validation_set,
                                    batch_size+safety).tolist()
@@ -155,11 +163,11 @@ class Dataset:
             if ats[i] not in ats[:i]:
                 try:
                     if buy:
-                        x1, x2, y1, y2, y3 = self.get_labled_frame_for_buy(
+                        x1, x2, y1, y2, y3, y4 = self.get_labled_frame_for_buy(
                             at=ats[i])
                     else:
                         # x, y1, y2 = self.labeled_sell_frame(at=ats[i])
-                        pass
+                        continue
                 except:
                     continue
             else:
@@ -169,8 +177,9 @@ class Dataset:
             x2s.append(x2)
             y1s.append(y1)
             y2s.append(y2)
+            y3s.append(y3)
             if buy:
-                y3s.append(y3)
+                y4s.append(y4)
 
             if len(x1s) >= batch_size:
                 break
@@ -179,10 +188,11 @@ class Dataset:
         x2s = np.array(x2s)
         y1s = np.array(y1s)
         y2s = np.array(y2s)
+        y3s = np.array(y3s)
         if buy:
-            y3s = np.array(y3s)
+            y4s = np.array(y4s)
         if buy:
-            return x1s, x2s, y1s, y2s, y3s
+            return x1s, x2s, y1s, y2s, y3s, y4s
         else:
             # return xs, y1s, y2s
             pass
@@ -191,9 +201,9 @@ class Dataset:
         ds = self.prepare_dataset(
             batch_size=batch_size, buy=buy, validation=validation, test=test)
         if buy:
-            x1, x2, y1, y2, y3 = ds
+            x1, x2, y1, y2, y3, y4 = ds
             np.save(folder+f'/x_{index}.npy', x1)
-            np.save(folder+f'/y_{index}.npy', np.array([x2, y1, y2, y3]))
+            np.save(folder+f'/y_{index}.npy', np.array([x2, y1, y2, y3, y4]))
         else:
             # x, y1, y2 = ds
             # np.save(folder+f'/x_{index}.npy', x)
