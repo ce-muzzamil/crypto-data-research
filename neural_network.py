@@ -18,91 +18,106 @@ def format_time(seconds):
         return f'{np.floor(seconds/60.)} mins & {np.round(seconds%60., 2)} secs'
 
 
-def buy_predictor(input1_shape=(64, 10), input2_shape=(1,)):
-    inputs1 = tf.keras.layers.Input(input1_shape)
-    
-    inputs2 = tf.keras.layers.Input(input2_shape)
-
-    gcfe = tf.keras.layers.GRU(64, return_sequences=True)(inputs1)
-    gcfe = tf.keras.layers.GRU(128, return_sequences=False)(gcfe)
+def feature_extractor(inputs, finetune=False):
+    gcfe = tf.keras.layers.GRU(
+        64, return_sequences=True, trainable=(not finetune))(inputs)
+    gcfe = tf.keras.layers.GRU(
+        128, return_sequences=False, trainable=(not finetune))(gcfe)
 
     gcfe = tf.keras.layers.Dropout(0.5)(gcfe)
-    extracted_features_ = tf.keras.layers.Dense(256, activation='relu')(gcfe)
-
     extracted_features = tf.keras.layers.Dense(
-        128, activation='relu')(extracted_features_)
-    extracted_features = tf.keras.layers.Concatenate(
-        axis=1)([extracted_features, inputs2])
-    extracted_features = tf.keras.layers.Dropout(0.5)(extracted_features)
-    buytime = tf.keras.layers.Dense(1, name="y1")(extracted_features)
+        256, activation='relu', trainable=(not finetune))(gcfe)
+    return extracted_features
 
-    extracted_features = tf.keras.layers.Dense(
-        128, activation='relu')(extracted_features_)
-    buy_price = tf.keras.layers.Concatenate(
-        axis=1)([extracted_features, inputs2, buytime])
-    buy_price = tf.keras.layers.Dropout(0.5)(buy_price)
-    buy_price = tf.keras.layers.Dense(1, name="y2")(buy_price)
-    
 
-    extracted_features = tf.keras.layers.Dense(
-        128, activation='relu')(extracted_features_)
-    selling_features = tf.keras.layers.Concatenate(
-        axis=1)([extracted_features, inputs2, buytime])
-    selling_features = tf.keras.layers.Dropout(0.5)(selling_features)
-    selltime = tf.keras.layers.Dense(1, name="y3")(selling_features)
+def regression(features, name, helpers=[]):
+    extracted_features = tf.keras.layers.Dense(128, activation='relu')(features)
+    extracted_features = tf.keras.layers.Concatenate(axis=1)([extracted_features, *helpers])
+    extracted_features = tf.keras.layers.Dense(128, activation='relu')(extracted_features)
+    extracted_features = tf.keras.layers.Dropout(0.25)(extracted_features)
+    out = tf.keras.layers.Dense(1, name=name)(extracted_features)
+    return out
 
-    extracted_features = tf.keras.layers.Dense(
-        128, activation='relu')(extracted_features_)
-    change_features = tf.keras.layers.Concatenate(
-        axis=1)([extracted_features, buytime, selltime])
-    change_features = tf.keras.layers.Dropout(0.5)(change_features)
-    aquired_change = tf.keras.layers.Dense(1, name="y4")(change_features)
+
+def ch_predictor(input1_shape=(64, 10), input2_shape=(1,), finetune=False):
+    inputs1 = tf.keras.layers.Input(input1_shape)
+    inputs2 = tf.keras.layers.Input(input2_shape)
+
+    features = feature_extractor(inputs1)
+    buytime = regression(features, 'y1', [inputs2])
+    selltime = regression(features, 'y3', [inputs2, buytime])
+    change = regression(features, 'y4', [buytime, selltime])
+
+    model = tf.keras.Model(inputs=[inputs1, inputs2], outputs=[change])
+    return model
+
+def bs_predictor(input1_shape=(64, 10), input2_shape=(1,), finetune=False):
+    inputs1 = tf.keras.layers.Input(input1_shape)
+    inputs2 = tf.keras.layers.Input(input2_shape)
+
+    features = feature_extractor(inputs1)
+    buytime = regression(features, 'y1', [inputs2])
+    selltime = regression(features, 'y3', [inputs2, buytime])
 
     model = tf.keras.Model(inputs=[inputs1, inputs2], outputs=[
-                           buytime, buy_price, selltime, aquired_change])
+                           buytime, selltime])
+    return model
 
+def p_predictor(input1_shape=(64, 10), input2_shape=(1,), finetune=False):
+    inputs1 = tf.keras.layers.Input(input1_shape)
+    inputs2 = tf.keras.layers.Input(input2_shape)
+
+    features = feature_extractor(inputs1)
+    buytime = regression(features, 'y1', [inputs2])
+    buyprice = regression(features, 'y2', [inputs2, buytime])
+
+    model = tf.keras.Model(inputs=[inputs1, inputs2], outputs=[buyprice])
     return model
 
 
-def get_bp_model(symbol, lr, allow_base=True):
-    with open(f'database/{symbol}/model_history/version_history.json', 'r') as file:
+def get_bp_model(symbol, lr, mtype, allow_base=True, finetune=False):
+    """mtype: ch, bs, p"""
+
+    with open(f'database/buy/{symbol}/{mtype}_history/version_history.json', 'r') as file:
         version_history = json.load(file)
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-    model = buy_predictor()
+
+    if mtype=='ch':
+        model = ch_predictor(finetune=finetune)
+    elif mtype=='bs':
+        model = bs_predictor(finetune=finetune)
+    elif mtype=='p':
+        model = p_predictor(finetune=finetune)
+    else:
+        raise Exception("Invalid mtype")
 
     if len(version_history) < 1:
-        model.compile(optimizer=optimizer, loss={
-            'y1': 'mae', 'y2': 'mae', 'y3': 'mae', 'y4': 'mae'})
+        model.compile(optimizer=optimizer, loss='mae')
         print("Generated New Model")
         return model
     else:
         sdata = version_history[-1]
         for data in version_history[:-1]:
             if data['loss'] < sdata['loss']:
-                if not allow_base and data['id']=='Base':
+                if not allow_base and data['id'] == 'Base':
                     pass
                 else:
                     sdata = data
 
         model_name = sdata['id']
         print(f"{model_name} selected")
-        model.load_weights(f'database/{symbol}/model_history/{model_name}.h5')
+        model.load_weights(f'database/buy/{symbol}/{mtype}_history/{model_name}.h5')
 
-        model.compile(optimizer=optimizer, loss={
-            'y1': 'mae', 'y2': 'mae', 'y3': 'mae', 'y4': 'mae'})
+        model.compile(optimizer=optimizer, loss='mae')
 
         print("Retrived Trained Model")
         return model
 
 
-def show_model():
-    print(get_bp_model(3e-4).summary())
-
-    
-def train_bp_model(symbol, inputs=None, outputs=None, validation_data=None, verbose=None, epochs=None, lr=3e-4, save=True, patience=20, mini_batch_size=32, allow_base=True, shuffle=False):
+def train_bp_model(symbol, mtype='ch', inputs=None, outputs=None, validation_data=None, verbose=None, epochs=None, lr=3e-4, save=True, patience=20, mini_batch_size=32, allow_base=True, shuffle=False, finetune=False):
     st = time.time()
-    model = get_bp_model(symbol, lr, allow_base)
+    model = get_bp_model(symbol, lr, mtype, allow_base, finetune=finetune)
     callback = tf.keras.callbacks.EarlyStopping(
         monitor='val_loss' if save else 'loss', patience=patience, restore_best_weights=True)
 
@@ -113,7 +128,7 @@ def train_bp_model(symbol, inputs=None, outputs=None, validation_data=None, verb
 
     if save:
         identifier = unique_identifier()
-        model.save_weights(f'database/{symbol}/model_history/{identifier}.h5')
+        model.save_weights(f'database/buy/{symbol}/{mtype}_history/{identifier}.h5')
 
         history = {"id": identifier, "time": time.time()}
         for key in hist.history.keys():
@@ -122,12 +137,12 @@ def train_bp_model(symbol, inputs=None, outputs=None, validation_data=None, verb
         history['lr'] = float(lr)
         history['epochs'] = len(hist.history['loss'])
 
-        with open(f'database/{symbol}/model_history/version_history.json', 'r') as file:
+        with open(f'database/buy/{symbol}/{mtype}_history/version_history.json', 'r') as file:
             version_history = json.load(file)
 
         version_history.append(history)
 
-        with open(f'database/{symbol}/model_history/version_history.json', 'w') as file:
+        with open(f'database/buy/{symbol}/{mtype}_history/version_history.json', 'w') as file:
             json.dump(version_history, file)
         return len(hist.history['loss'])
     else:
