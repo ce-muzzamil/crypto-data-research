@@ -143,6 +143,40 @@ class Dataset:
         ctime = ctime.weekday()*288 + (ctime.hour*60.0 + ctime.minute)/5.0
         return a, ctime, mni, buy_price,  next_mxi, next_ch*100.0
 
+    def get_labled_frame_for_sell(
+        self,
+        at=80000,
+        length=527,
+        backwardlook=527,
+        max_size=64,
+        kinterval=5.0,
+    ):
+        a, mxis, mnis = self.get_minimalistic_frame(
+            at=at, length=length, backwardlook=backwardlook, max_size=max_size, kinterval=kinterval)
+
+        mxi = int(mxis.max())
+        mni = int(mnis.max())
+
+        sell_price = self.nf.loc[mxi, 'meanp']
+        random_mxi = np.random.randint(mni+1, mxi)
+        mxi = (mxi-random_mxi)*kinterval
+
+        vector = np.zeros((a.shape[1],))
+        ft = self.nf.iloc[mni:random_mxi, :]
+        vector[[0, 1]] = ft.loc[ft.index[-1], ['meanp', 'stdp']]
+        vector[[3, 5, 6]] = ft.loc[:, ['meanp', 'taker', 'maker']].mean()
+        meanpstd = ft.loc[:, 'meanp'].std()
+        if np.isnan(meanpstd):
+            meanpstd = 0.0
+        vector[4] = meanpstd
+        vector[[7, 8]] = ft.loc[:, ['vol', 'ntrds']].sum()
+        vector[9] = ft.shape[0]*kinterval
+        ctime = pd.to_datetime(ft['stime'].iloc[-1], unit='ms')
+
+        a = np.concatenate([a[:-1], vector.reshape(1, -1)], axis=0)
+        ctime = ctime.weekday()*288 + (ctime.hour*60.0 + ctime.minute)/5.0
+        return a, ctime, mxi, sell_price
+
     def prepare_dataset(self, batch_size=1024, validation=False, test=False, buy=True):
         safety = 4096
         x1s = []
@@ -166,8 +200,7 @@ class Dataset:
                         x1, x2, y1, y2, y3, y4 = self.get_labled_frame_for_buy(
                             at=ats[i])
                     else:
-                        # x, y1, y2 = self.labeled_sell_frame(at=ats[i])
-                        continue
+                        x1, x2, y1, y2 = self.get_labled_frame_for_sell(at=ats[i])
                 except:
                     continue
             else:
@@ -177,8 +210,8 @@ class Dataset:
             x2s.append(x2)
             y1s.append(y1)
             y2s.append(y2)
-            y3s.append(y3)
             if buy:
+                y3s.append(y3)
                 y4s.append(y4)
 
             if len(x1s) >= batch_size:
@@ -188,14 +221,14 @@ class Dataset:
         x2s = np.array(x2s)
         y1s = np.array(y1s)
         y2s = np.array(y2s)
-        y3s = np.array(y3s)
         if buy:
+            y3s = np.array(y3s)
             y4s = np.array(y4s)
+
         if buy:
             return x1s, x2s, y1s, y2s, y3s, y4s
         else:
-            # return xs, y1s, y2s
-            pass
+            return x1s, x2s, y1s, y2s
 
     def prepare_dataset_wrapper(self, folder='', index=0, batch_size=2**12, buy=True, validation=False, test=False):
         ds = self.prepare_dataset(
@@ -205,10 +238,9 @@ class Dataset:
             np.save(folder+f'/x_{index}.npy', x1)
             np.save(folder+f'/y_{index}.npy', np.array([x2, y1, y2, y3, y4]))
         else:
-            # x, y1, y2 = ds
-            # np.save(folder+f'/x_{index}.npy', x)
-            # np.save(folder+f'/y_{index}.npy', np.array([y1, y2]))
-            pass
+            x1, x2, y1, y2 = ds
+            np.save(folder+f'/x_{index}.npy', x1)
+            np.save(folder+f'/y_{index}.npy', np.array([x2, y1, y2]))
 
     def get_data_set(self, batch_size, buy=True, validation=False, test=False, max_procs=10, single_process_size=2**8):
         x = []

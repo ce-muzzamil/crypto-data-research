@@ -1,6 +1,9 @@
+import os
+import glob
 import json
 import time
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 
 
@@ -51,17 +54,6 @@ def ch_predictor(input1_shape=(64, 10), input2_shape=(1,), finetune=False):
     model = tf.keras.Model(inputs=[inputs1, inputs2], outputs=[change])
     return model
 
-def bs_predictor(input1_shape=(64, 10), input2_shape=(1,), finetune=False):
-    inputs1 = tf.keras.layers.Input(input1_shape)
-    inputs2 = tf.keras.layers.Input(input2_shape)
-
-    features = feature_extractor(inputs1)
-    buytime = regression(features, 'y1', [inputs2])
-    selltime = regression(features, 'y3', [inputs2, buytime])
-
-    model = tf.keras.Model(inputs=[inputs1, inputs2], outputs=[
-                           buytime, selltime])
-    return model
 
 def p_predictor(input1_shape=(64, 10), input2_shape=(1,), finetune=False):
     inputs1 = tf.keras.layers.Input(input1_shape)
@@ -74,19 +66,41 @@ def p_predictor(input1_shape=(64, 10), input2_shape=(1,), finetune=False):
     model = tf.keras.Model(inputs=[inputs1, inputs2], outputs=[buyprice])
     return model
 
+def b_predictor(input1_shape=(64, 10), input2_shape=(1,), finetune=False):
+    inputs1 = tf.keras.layers.Input(input1_shape)
+    inputs2 = tf.keras.layers.Input(input2_shape)
 
-def get_bp_model(symbol, lr, mtype, allow_base=True, finetune=False):
+    features = feature_extractor(inputs1)
+    buytime = regression(features, 'y1', [inputs2])
+
+    model = tf.keras.Model(inputs=[inputs1, inputs2], outputs=[buytime])
+    return model
+
+def s_predictor(input1_shape=(64, 10), input2_shape=(1,), finetune=False):
+    inputs1 = tf.keras.layers.Input(input1_shape)
+    inputs2 = tf.keras.layers.Input(input2_shape)
+
+    features = feature_extractor(inputs1)
+    buytime = regression(features, 'y1', [inputs2])
+    selltime = regression(features, 'y3', [inputs2, buytime])
+
+    model = tf.keras.Model(inputs=[inputs1, inputs2], outputs=[selltime])
+    return model
+
+def get_bp_model(symbol, lr, mtype, allow_base=True, finetune=False, trans='buy'):
     """mtype: ch, bs, p"""
 
-    with open(f'database/buy/{symbol}/{mtype}_history/version_history.json', 'r') as file:
+    with open(f'database/{trans}/{symbol}/{mtype}_history/version_history.json', 'r') as file:
         version_history = json.load(file)
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
     if mtype=='ch':
         model = ch_predictor(finetune=finetune)
-    elif mtype=='bs':
-        model = bs_predictor(finetune=finetune)
+    elif mtype=='b':
+        model = b_predictor(finetune=finetune)
+    elif mtype=='s':
+        model = s_predictor(finetune=finetune)
     elif mtype=='p':
         model = p_predictor(finetune=finetune)
     else:
@@ -107,7 +121,7 @@ def get_bp_model(symbol, lr, mtype, allow_base=True, finetune=False):
 
         model_name = sdata['id']
         print(f"{model_name} selected")
-        model.load_weights(f'database/buy/{symbol}/{mtype}_history/{model_name}.h5')
+        model.load_weights(f'database/{trans}/{symbol}/{mtype}_history/{model_name}.h5')
 
         model.compile(optimizer=optimizer, loss='mae')
 
@@ -115,11 +129,17 @@ def get_bp_model(symbol, lr, mtype, allow_base=True, finetune=False):
         return model
 
 
-def train_bp_model(symbol, mtype='ch', inputs=None, outputs=None, validation_data=None, verbose=None, epochs=None, lr=3e-4, save=True, patience=20, mini_batch_size=32, allow_base=True, shuffle=False, finetune=False):
+
+def train_bp_model(symbol, mtype='ch', inputs=None, outputs=None, validation_data=None, verbose=None, epochs=None, lr=3e-4, save=True, patience=20, mini_batch_size=32, allow_base=True, shuffle=False, finetune=False, trans='buy', earlystopping='v'):
     st = time.time()
-    model = get_bp_model(symbol, lr, mtype, allow_base, finetune=finetune)
-    callback = tf.keras.callbacks.EarlyStopping(
-        monitor='val_loss' if save else 'loss', patience=patience, restore_best_weights=True)
+    model = get_bp_model(symbol, lr, mtype, allow_base, finetune=finetune, trans=trans)
+
+    if earlystopping=='v':
+        callback = tf.keras.callbacks.EarlyStopping(
+            monitor='val_loss' if save else 'loss', patience=patience, restore_best_weights=True)
+    elif earlystopping=='l':
+        callback = tf.keras.callbacks.EarlyStopping(
+            monitor='loss', patience=patience, restore_best_weights=True)
 
     hist = model.fit(inputs, outputs, epochs=epochs,
                      validation_data=validation_data, verbose=verbose, callbacks=[callback], batch_size=mini_batch_size, shuffle=shuffle)
@@ -128,7 +148,7 @@ def train_bp_model(symbol, mtype='ch', inputs=None, outputs=None, validation_dat
 
     if save:
         identifier = unique_identifier()
-        model.save_weights(f'database/buy/{symbol}/{mtype}_history/{identifier}.h5')
+        model.save_weights(f'database/{trans}/{symbol}/{mtype}_history/{identifier}.h5')
 
         history = {"id": identifier, "time": time.time()}
         for key in hist.history.keys():
@@ -137,16 +157,54 @@ def train_bp_model(symbol, mtype='ch', inputs=None, outputs=None, validation_dat
         history['lr'] = float(lr)
         history['epochs'] = len(hist.history['loss'])
 
-        with open(f'database/buy/{symbol}/{mtype}_history/version_history.json', 'r') as file:
+        with open(f'database/{trans}/{symbol}/{mtype}_history/version_history.json', 'r') as file:
             version_history = json.load(file)
 
         version_history.append(history)
 
-        with open(f'database/buy/{symbol}/{mtype}_history/version_history.json', 'w') as file:
+        with open(f'database/{trans}/{symbol}/{mtype}_history/version_history.json', 'w') as file:
             json.dump(version_history, file)
         return len(hist.history['loss'])
     else:
         return hist
+
+def reset_history(
+    symbol="ADAUSDT",
+    mtype='ch',
+    trans='buy',
+    new_name='Base'
+):
+    path = f'database/{trans}/{symbol}/{mtype}_history'
+    f = pd.read_json(f'{path}/version_history.json')
+    f['id'] = f['id'].astype(str)
+    id = f.loc[f['loss'].argmin(), 'id']
+    id = str(id)
+    while not os.path.isfile(f'{path}/{id+".h5"}'):
+        f.drop(index=f.index[f['id']==id], axis=0, inplace=True)
+        id = f.loc[f['loss'].argmin(), 'id']
+        id = str(id)
+    
+    model_names = [r.split('\\')[-1] for r in glob.glob(f'{path}/*.h5')]
+    for model_name in model_names:
+        if model_name==(id+".h5") or model_name==("SBASE.h5"):
+            continue
+        os.remove(f'{path}/{model_name}')
+
+    os.rename(f'{path}/{id}.h5', f'{path}/{new_name}.h5')
+
+    with open(f'{path}/version_history.json', 'r') as file:
+        mh = json.load(file)
+
+    nmh = []
+    for h in mh:
+        if h["id"]==id:
+            h['id'] = new_name
+            h['lr'] = 1
+            nmh.append(h)
+
+    with open(f'{path}/version_history.json', 'w') as file:
+        json.dump(nmh, file)
+
 
 
 # def get_op_lr(lrx=None, lry=None, mini_batch_size=32):
